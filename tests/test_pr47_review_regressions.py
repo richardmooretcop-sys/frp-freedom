@@ -1,9 +1,11 @@
 from unittest.mock import Mock
 
-from src.ai.ai_engine import DeviceProfile
+import pytest
+
+from src.ai.ai_engine import AIEngine, DeviceProfile
 from src.bypass.bypass_manager import BypassManager
 from src.bypass.system_exploits import SystemExploitManager
-from src.bypass.types import BypassMethod
+from src.bypass.types import BypassMethod, BypassResult
 from src.core.device_manager import DeviceInfo, describe_connection_capabilities
 from src.gui.device_selection import DeviceSelectionFrame
 
@@ -125,3 +127,16 @@ def test_capability_summary_labels_transport_facts_as_transport_not_methods():
     assert "Interface Access: Available" in text
     assert "ADB Methods:" not in text
     assert "Fastboot Methods:" not in text
+
+
+def test_ai_engine_keeps_duration_metrics_for_fast_method_ranking():
+    engine = AIEngine(Mock())
+    device = make_device()
+
+    engine.update_method_performance("adb_setup_wizard", device, BypassResult.SUCCESS, 2.5)
+    engine.update_method_performance("adb_setup_wizard", device, BypassResult.FAILED, 4.5)
+    engine.update_method_performance("emergency_call_exploit", device, BypassResult.SUCCESS, 1.0)
+
+    assert engine.learning_data["method_stats"]["adb_setup_wizard"]["total_duration"] == 7.0
+    assert engine.get_average_execution_time() == pytest.approx(2.6666666667)
+    assert engine.get_fastest_methods() == ["emergency_call_exploit", "adb_setup_wizard"]
