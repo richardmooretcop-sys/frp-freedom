@@ -46,7 +46,7 @@ def test_adb_poll_reuses_details_for_an_unchanged_device(monkeypatch):
     manager._get_adb_device_info.assert_not_called()
 
 
-def test_scan_clears_stale_modem_port_before_rebuilding_associations():
+def test_scan_rebuilds_modem_ports_on_local_records_before_publishing():
     device = make_device(modem_port="COM7")
     manager = DeviceManager.__new__(DeviceManager)
     manager.logger = logging.getLogger(__name__)
@@ -55,12 +55,22 @@ def test_scan_clears_stale_modem_port_before_rebuilding_associations():
     manager._scan_adb_devices = Mock(return_value=[device])
     manager._scan_fastboot_devices = Mock(return_value=[])
     manager._scan_download_mode_devices = Mock(return_value=[])
-    manager.scan_samsung_modems = Mock(return_value=[])
+
+    def scan_modems(scan_devices):
+        assert device.modem_port == "COM7"
+        assert scan_devices[0] is not device
+        assert scan_devices[0].modem_port == ""
+        scan_devices[0].modem_port = "COM8"
+        return []
+
+    manager.scan_samsung_modems = Mock(side_effect=scan_modems)
 
     manager.scan_devices(refresh_details=False)
 
-    assert device.modem_port == ""
-    manager.scan_samsung_modems.assert_called_once_with()
+    manager.scan_samsung_modems.assert_called_once()
+    assert device.modem_port == "COM7"
+    assert manager.connected_devices[0] is not device
+    assert manager.connected_devices[0].modem_port == "COM8"
 
 
 def test_device_list_poll_does_not_rebuild_unchanged_tree_rows():
@@ -82,7 +92,7 @@ def test_device_list_poll_does_not_rebuild_unchanged_tree_rows():
     old_device = make_device(model="Old Model")
     frame.device_map = {"row-1": old_device}
     frame.selected_device = old_device
-    frame.device_tree.selection.return_value = ("row-1",)
+    frame.device_tree.selection.side_effect = [("row-1",), ()]
     frame.update_device_details = Mock()
 
     refreshed_device = make_device()
@@ -94,3 +104,27 @@ def test_device_list_poll_does_not_rebuild_unchanged_tree_rows():
     assert frame.device_map["row-1"] is refreshed_device
     assert frame.selected_device is refreshed_device
     frame.update_device_details.assert_called_once_with(refreshed_device)
+
+
+def test_removing_selected_device_clears_selection_state():
+    frame = DeviceSelectionFrame.__new__(DeviceSelectionFrame)
+    frame.winfo_exists = Mock(return_value=True)
+    frame.device_tree = Mock()
+    frame.device_tree.winfo_exists.return_value = True
+    frame.device_tree.selection.side_effect = [("row-1",), ()]
+    frame.status_label = Mock()
+    frame.status_label.winfo_exists.return_value = True
+    frame.device_items_by_key = {("adb", "serial-001"): "row-1"}
+    frame.device_map = {"row-1": make_device()}
+    frame.selected_device = frame.device_map["row-1"]
+    frame.select_button = Mock()
+    frame.info_button = Mock()
+    frame.update_device_details = Mock()
+
+    DeviceSelectionFrame.update_device_list(frame, [])
+
+    assert frame.selected_device is None
+    frame.device_tree.delete.assert_called_once_with("row-1")
+    frame.select_button.configure.assert_called_once_with(state="disabled")
+    frame.info_button.configure.assert_called_once_with(state="disabled")
+    frame.update_device_details.assert_called_once_with(None)

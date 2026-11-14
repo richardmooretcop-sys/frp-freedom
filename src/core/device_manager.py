@@ -12,10 +12,10 @@ import sys
 import os
 import shutil
 import threading
+from dataclasses import dataclass, replace
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import json
-from dataclasses import dataclass
 import serial.tools.list_ports
 from .samsung_adb_enabler import SamsungADBEnabler
 
@@ -169,16 +169,14 @@ class DeviceManager:
         download_devices = self._scan_download_mode_devices()
         devices.extend(download_devices)
         
-        # Update connected_devices BEFORE modem scan so matching works correctly
-        self.connected_devices = devices
-        for device in devices:
-            device.modem_port = ""
+        # Work on scan-local records so callers never observe partial associations.
+        devices = [replace(device, modem_port="") for device in devices]
         
         # Scan Samsung modems (merged into existing devices if matched)
-        modem_devices = self.scan_samsung_modems()
+        modem_devices = self.scan_samsung_modems(devices)
         devices.extend(modem_devices)
-        
-        # Final update with any new modem-only devices
+
+        # Publish complete device records only after modem associations are rebuilt.
         self.connected_devices = devices
         self.logger.info(f"Found {len(devices)} connected device(s)")
         
@@ -324,10 +322,13 @@ class DeviceManager:
         return devices
     
     
-    def scan_samsung_modems(self) -> List[DeviceInfo]:
+    def scan_samsung_modems(
+        self, devices: Optional[List[DeviceInfo]] = None
+    ) -> List[DeviceInfo]:
         """Scan for Samsung devices in modem mode"""
         self.logger.info("Scanning for Samsung modem devices...")
         new_devices = []
+        devices = self.connected_devices if devices is None else devices
         
         try:
             ports = list(serial.tools.list_ports.comports())
@@ -347,7 +348,7 @@ class DeviceManager:
                     port_serial = getattr(port, 'serial_number', '')
                     
                     # Check against existing devices
-                    for device in self.connected_devices:
+                    for device in devices:
                         # Check strict serial match if available
                         if port_serial and device.serial == port_serial:
                             self.logger.info(f"Matched modem {port.device} to existing device {device.serial}")

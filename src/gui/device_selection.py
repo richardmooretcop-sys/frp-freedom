@@ -293,6 +293,8 @@ Device Connection Guide
 
         current_keys = set()
         try:
+            selected_items = set(self.device_tree.selection())
+            selected_row_removed = False
             for device in devices:
                 key = (device.connection_type, device.serial)
                 current_keys.add(key)
@@ -325,8 +327,11 @@ Device Connection Guide
 
             for key in self.device_items_by_key.keys() - current_keys:
                 item_id = self.device_items_by_key.pop(key)
+                selected_row_removed = selected_row_removed or item_id in selected_items
                 self.device_tree.delete(item_id)
                 self.device_map.pop(item_id, None)
+            if selected_row_removed:
+                self.on_device_select(None)
         except (tk.TclError, AttributeError):
             return
 
